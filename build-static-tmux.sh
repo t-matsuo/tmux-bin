@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 export CC=cc
 export REALCC=${CC}
@@ -42,7 +42,9 @@ TMUX_BIN="tmux.${OS}-${ARCH}"
 ######################################
 ###### BEGIN VERSION DEFINITION ######
 ######################################
-TMUX_VERSION=3.5a
+TMUX_VERSION=git
+#TMUX_GIT_COMMIT=33cfe8b
+TMUX_GIT_COMMIT=latest
 MUSL_VERSION=1.2.5
 NCURSES_VERSION=6.5
 LIBEVENT_VERSION=2.1.12
@@ -56,8 +58,12 @@ TMUX_STATIC_HOME="${TMUX_STATIC_HOME:-/tmp/tmux-static}"
 
 LOG_DIR="${TMUX_STATIC_HOME}/log"
 
-TMUX_ARCHIVE="tmux-${TMUX_VERSION}.tar.gz"
-TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}"
+if [[ "$TMUX_VERSION" != "git" ]]; then
+    TMUX_ARCHIVE="tmux-${TMUX_VERSION}.tar.gz"
+    TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}"
+else
+    TMUX_GIT_URL="https://github.com/tmux/tmux.git"
+fi
 
 MUSL_ARCHIVE="musl-${MUSL_VERSION}.tar.gz"
 MUSL_URL="https://musl.libc.org/releases/"
@@ -226,7 +232,7 @@ rm -rf ${TMUX_STATIC_HOME:?}/src/upx-${UPX_VERSION}-amd64_linux
 rm -rf ${TMUX_STATIC_HOME:?}/src/musl-${MUSL_VERSION}
 rm -rf ${TMUX_STATIC_HOME:?}/src/libevent-${LIBEVENT_VERSION}-stable
 rm -rf ${TMUX_STATIC_HOME:?}/src/ncurses-${NCURSES_VERSION}
-rm -rf ${TMUX_STATIC_HOME:?}/src/tmux-${TMUX_VERSION}
+rm -rf ${TMUX_STATIC_HOME:?}/src/tmux-*
 
 echo ""
 echo "current settings"
@@ -392,17 +398,38 @@ echo "------------------"
 LOG_FILE="tmux-${TMUX_VERSION}.log"
 
 cd ${TMUX_STATIC_HOME}/src || exit 1
-if [ ! -f ${TMUX_ARCHIVE} ]; then
-    printf "Downloading..."
-    wget --no-verbose ${TMUX_URL}/${TMUX_ARCHIVE} > ${LOG_DIR}/${LOG_FILE} 2>&1
-    checkResult $?
+if [[ "$TMUX_VERSION" != "git" ]]; then
+    if [ ! -f ${TMUX_ARCHIVE} ]; then
+        printf "Downloading..."
+        wget --no-verbose ${TMUX_URL}/${TMUX_ARCHIVE} > ${LOG_DIR}/${LOG_FILE} 2>&1
+        checkResult $?
+    fi
+else
+    printf "git clone..."
+    git clone "$TMUX_GIT_URL" || exit 1
 fi
 
 printf "Extracting...."
-tar xzf ${TMUX_ARCHIVE}
-checkResult $?
 
-cd tmux-${TMUX_VERSION} || exit 1
+if [[ "$TMUX_VERSION" != "git" ]]; then
+    tar xzf ${TMUX_ARCHIVE}
+    checkResult $?
+    cd tmux-${TMUX_VERSION} || exit 1
+else
+    mv tmux tmux-$TMUX_GIT_COMMIT || exit 1
+    cd tmux-$TMUX_GIT_COMMIT || exit 1
+    if [[ "$TMUX_GIT_COMMIT" != "latest" ]]; then
+        git checkout "$TMUX_GIT_COMMIT" || exit 1
+    else
+        TMUX_GIT_COMMIT=$( git show --format='%h' --no-patch ) || exit 1
+    fi
+    TMUX_GIT_COMMIT_DATE=$( git log -1 --date=format:"%Y%m%d" --format='%cd' ) || exit 1
+    TMUX_BIN="tmux.${OS}-${ARCH}.$TMUX_GIT_COMMIT_DATE.$TMUX_GIT_COMMIT"
+fi
+
+printf "autogen.sh..."
+./autogen.sh >> ${LOG_DIR}/${LOG_FILE} 2>&1
+checkResult $?
 
 printf "Configuring..."
 ./configure --prefix=${TMUX_STATIC_HOME} \
@@ -424,7 +451,7 @@ checkResult $?
 
 printf "Compiling....."
 make >> ${LOG_DIR}/${LOG_FILE} 2>&1
-checkResult $?
+    checkResult $?
 
 printf "Installing...."
 make install >> ${LOG_DIR}/${LOG_FILE} 2>&1
